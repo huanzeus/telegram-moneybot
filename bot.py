@@ -1,54 +1,50 @@
-import logging
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+import telebot
 from utils import save_transaction, get_summary
 from chart import draw_summary_chart
 
-# Thiết lập token bot Telegram (đã thêm token của bạn)
-TOKEN = "7623058416:AAGuBeZk0RIO2K77AFlCq2uJjuq3fSiIOMc"
+API_TOKEN = '7623058416:AAGuBeZk0RIO2K77AFlCq2uJjuq3fSiIOMc'
+bot = telebot.TeleBot(API_TOKEN)
 
-# Bật logging để debug nếu cần
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)
+@bot.message_handler(commands=['start'])
+def send_welcome(message):
+    bot.reply_to(message,
+        "Chào mừng bạn đến với bot thống kê chi tiêu @tuongnhithongkechitieu!\n"
+        "Bạn có thể nhập:\n"
+        "`+100000 lương` để thêm thu nhập\n"
+        "`-50000 ăn trưa` để ghi chi tiêu\n"
+        "`/week`, `/month`, `/year` để xem thống kê",
+        parse_mode="Markdown"
+    )
 
-# Xử lý tin nhắn người dùng nhập tiền thu/chi
-async def handle_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip()
-    if text.startswith('+') or text.startswith('-'):
-        save_transaction(update.message.chat_id, text)
-        await update.message.reply_text("✅ Đã lưu giao dịch!")
-    else:
-        await update.message.reply_text(
-            "❗ Vui lòng nhập đúng định dạng:\n"
-            "`+100000 Lương` để thu\n"
-            "`-50000 Ăn sáng` để chi",
-            parse_mode="Markdown"
-        )
+@bot.message_handler(commands=['week', 'month', 'year'])
+def send_summary(message):
+    period = message.text[1:]
+    summary = get_summary(period)
+    chart = draw_summary_chart(summary["transactions"], period)
+    caption = f"📊 Thống kê {period}:\n"
+    caption += f"🟢 Thu nhập: {summary['income']:,} VND\n"
+    caption += f"🔴 Chi tiêu: {summary['expense']:,} VND"
+    bot.send_photo(message.chat.id, chart, caption=caption)
 
-# Xử lý lệnh thống kê theo tuần, tháng, năm
-async def show_summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    cmd = update.message.text[1:].lower()  # week / month / year
-    summary_text, chart_data = get_summary(update.message.chat_id, mode=cmd)
-    await update.message.reply_text(summary_text)
-    
-    # Gửi biểu đồ nếu có dữ liệu
-    chart = draw_summary_chart(chart_data, mode=cmd)
-    if chart:
-        await update.message.reply_photo(photo=chart)
+@bot.message_handler(func=lambda m: m.text)
+def handle_transaction(message):
+    text = message.text.strip()
+    try:
+        if text[0] not in ('+', '-'):
+            raise ValueError("Dòng nhập phải bắt đầu bằng + hoặc -")
 
-# Khởi chạy bot
-if __name__ == "__main__":
-    app = ApplicationBuilder().token(TOKEN).build()
+        parts = text[1:].strip().split(" ", 1)
+        amount = int(parts[0])
+        description = parts[1] if len(parts) > 1 else ""
 
-    # Xử lý tin nhắn thu/chi
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_transaction))
+        if text[0] == '+':
+            save_transaction(amount, "income", description)
+            bot.reply_to(message, f"✅ Đã ghi thu nhập: {amount} VND - {description}")
+        else:
+            save_transaction(amount, "expense", description)
+            bot.reply_to(message, f"✅ Đã ghi chi tiêu: {amount} VND - {description}")
 
-    # Các lệnh thống kê
-    app.add_handler(CommandHandler("week", show_summary))
-    app.add_handler(CommandHandler("month", show_summary))
-    app.add_handler(CommandHandler("year", show_summary))
+    except Exception as e:
+        bot.reply_to(message, f"❌ Lỗi: {str(e)}")
 
-    # Bắt đầu chạy bot
-    print("🤖 Bot đang chạy...")
-    app.run_polling()
+bot.infinity_polling()
