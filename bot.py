@@ -1,68 +1,54 @@
 import logging
-import datetime
-from telegram import Update, InputFile
+from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
-from db import init_db, add_transaction, get_transactions
+from utils import save_transaction, get_summary
 from chart import draw_summary_chart
 
+# Thiết lập token bot Telegram (đã thêm token của bạn)
 TOKEN = "7623058416:AAGuBeZk0RIO2K77AFlCq2uJjuq3fSiIOMc"
 
-logging.basicConfig(level=logging.INFO)
-init_db()
+# Bật logging để debug nếu cần
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+)
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Chào mừng bạn đến với Bot Thống kê chi tiêu!\n\nDùng:\n+ 50000 Lương\n- 20000 Cafe\n\n/week /month /year để xem thống kê.")
-
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# Xử lý tin nhắn người dùng nhập tiền thu/chi
+async def handle_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
-    user_id = update.effective_user.id
-    today = datetime.date.today().isoformat()
-
     if text.startswith('+') or text.startswith('-'):
-        sign = 'income' if text.startswith('+') else 'expense'
-        try:
-            parts = text[1:].strip().split(" ", 1)
-            amount = int(parts[0])
-            note = parts[1] if len(parts) > 1 else ''
-            add_transaction(user_id, today, sign, amount, note)
-            await update.message.reply_text("✅ Ghi lại thành công!")
-        except:
-            await update.message.reply_text("❌ Định dạng sai. Dùng: + 50000 Lương hoặc - 20000 Cafe")
+        save_transaction(update.message.chat_id, text)
+        await update.message.reply_text("✅ Đã lưu giao dịch!")
     else:
-        await update.message.reply_text("❗ Dùng: + 100000 Tiền thưởng hoặc - 30000 Ăn trưa")
+        await update.message.reply_text(
+            "❗ Vui lòng nhập đúng định dạng:\n"
+            "`+100000 Lương` để thu\n"
+            "`-50000 Ăn sáng` để chi",
+            parse_mode="Markdown"
+        )
 
-async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE, range_days):
-    user_id = update.effective_user.id
-    today = datetime.date.today()
-    start = today - datetime.timedelta(days=range_days)
+# Xử lý lệnh thống kê theo tuần, tháng, năm
+async def show_summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    cmd = update.message.text[1:].lower()  # week / month / year
+    summary_text, chart_data = get_summary(update.message.chat_id, mode=cmd)
+    await update.message.reply_text(summary_text)
+    
+    # Gửi biểu đồ nếu có dữ liệu
+    chart = draw_summary_chart(chart_data, mode=cmd)
+    if chart:
+        await update.message.reply_photo(photo=chart)
 
-    data = get_transactions(user_id, start.isoformat(), today.isoformat())
-    if not data:
-        await update.message.reply_text("Không có dữ liệu.")
-        return
+# Khởi chạy bot
+if __name__ == "__main__":
+    app = ApplicationBuilder().token(TOKEN).build()
 
-    income = sum(row[2] for row in data if row[1] == "income")
-    expense = sum(row[2] for row in data if row[1] == "expense")
-    balance = income - expense
+    # Xử lý tin nhắn thu/chi
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_transaction))
 
-    msg = f"📊 Thống kê:\n\n🔹 Tổng thu: {income:,}đ\n🔸 Tổng chi: {expense:,}đ\n💰 Còn lại: {balance:,}đ"
-    draw_summary_chart(data)
-    await update.message.reply_photo(photo=InputFile("chart.png"), caption=msg)
+    # Các lệnh thống kê
+    app.add_handler(CommandHandler("week", show_summary))
+    app.add_handler(CommandHandler("month", show_summary))
+    app.add_handler(CommandHandler("year", show_summary))
 
-async def week(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await summary(update, context, 7)
-
-async def month(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await summary(update, context, 30)
-
-async def year(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await summary(update, context, 365)
-
-app = ApplicationBuilder().token(TOKEN).build()
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("week", week))
-app.add_handler(CommandHandler("month", month))
-app.add_handler(CommandHandler("year", year))
-app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
-
-app.run_polling()
+    # Bắt đầu chạy bot
+    print("🤖 Bot đang chạy...")
+    app.run_polling()
