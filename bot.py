@@ -2,49 +2,41 @@ import telebot
 from utils import save_transaction, get_summary
 from chart import draw_summary_chart
 
-API_TOKEN = '7623058416:AAGuBeZk0RIO2K77AFlCq2uJjuq3fSiIOMc'
-bot = telebot.TeleBot(API_TOKEN)
+TOKEN = "7623058416:AAGuBeZk0RIO2K77AFlCq2uJjuq3fSiIOMc"
+bot = telebot.TeleBot(TOKEN)
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    bot.reply_to(message,
-        "Chào mừng bạn đến với bot thống kê chi tiêu @tuongnhithongkechitieu!\n"
-        "Bạn có thể nhập:\n"
-        "`+100000 lương` để thêm thu nhập\n"
-        "`-50000 ăn trưa` để ghi chi tiêu\n"
-        "`/week`, `/month`, `/year` để xem thống kê",
-        parse_mode="Markdown"
+    bot.reply_to(message, "Xin chào! Gửi /help để xem hướng dẫn sử dụng bot.")
+
+@bot.message_handler(commands=['help'])
+def send_help(message):
+    help_text = (
+        "📌 Gửi tin nhắn theo định dạng:\n"
+        "`+100000` để ghi thu nhập\n"
+        "`-50000` để ghi chi tiêu\n\n"
+        "📊 Xem thống kê:\n"
+        "`/week` - trong tuần\n"
+        "`/month` - trong tháng\n"
+        "`/year` - trong năm"
     )
+    bot.reply_to(message, help_text, parse_mode="Markdown")
 
 @bot.message_handler(commands=['week', 'month', 'year'])
 def send_summary(message):
     period = message.text[1:]
-    summary = get_summary(period)
-    chart = draw_summary_chart(summary["transactions"], period)
-    caption = f"📊 Thống kê {period}:\n"
-    caption += f"🟢 Thu nhập: {summary['income']:,} VND\n"
-    caption += f"🔴 Chi tiêu: {summary['expense']:,} VND"
-    bot.send_photo(message.chat.id, chart, caption=caption)
+    summary = get_summary(message.from_user.id, period)
+    chart = draw_summary_chart(summary)
+    bot.send_photo(message.chat.id, chart)
 
-@bot.message_handler(func=lambda m: m.text)
-def handle_transaction(message):
-    text = message.text.strip()
+@bot.message_handler(func=lambda m: True)
+def log_transaction(message):
     try:
-        if text[0] not in ('+', '-'):
-            raise ValueError("Dòng nhập phải bắt đầu bằng + hoặc -")
+        amount = int(message.text.strip())
+        save_transaction(message.from_user.id, amount)
+        msg = f"✅ Đã lưu {'thu nhập' if amount > 0 else 'chi tiêu'}: {abs(amount):,}đ"
+        bot.reply_to(message, msg)
+    except:
+        bot.reply_to(message, "❌ Vui lòng nhập số hợp lệ. Ví dụ: +100000 hoặc -50000")
 
-        parts = text[1:].strip().split(" ", 1)
-        amount = int(parts[0])
-        description = parts[1] if len(parts) > 1 else ""
-
-        if text[0] == '+':
-            save_transaction(amount, "income", description)
-            bot.reply_to(message, f"✅ Đã ghi thu nhập: {amount} VND - {description}")
-        else:
-            save_transaction(amount, "expense", description)
-            bot.reply_to(message, f"✅ Đã ghi chi tiêu: {amount} VND - {description}")
-
-    except Exception as e:
-        bot.reply_to(message, f"❌ Lỗi: {str(e)}")
-
-bot.infinity_polling()
+bot.polling()
