@@ -1,3 +1,2 @@
-python-telegram-bot==20.6
-matplotlib
-pandas
+pyTelegramBotAPI==4.12.0
+matplotlib==3.8.4
